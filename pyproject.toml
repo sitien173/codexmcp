@@ -24,9 +24,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-[project.urls]
-Homepage = "https://github.com/GuDaStudio/codexmcp"
-
 [project.scripts]
 codexmcp = "codexmcp.cli:main"
 

@@ -130,85 +130,48 @@ def windows_escape(prompt):
 @mcp.tool(
     name="codex",
     description="""
-    Executes a non-interactive Codex session via CLI to perform AI-assisted coding tasks in a secure workspace.
+    Executes a non-interactive Codex session via CLI to perform AI-assisted coding tasks.
     This tool wraps the `codex exec` command, enabling model-driven code generation, debugging, or automation based on natural language prompts.
-    It supports resuming ongoing sessions for continuity and enforces sandbox policies to prevent unsafe operations. Ideal for integrating Codex into MCP servers for agentic workflows, such as code reviews or repo modifications.
+    It supports resuming ongoing sessions for continuity. Ideal for integrating Codex into MCP servers for agentic workflows, such as code reviews or repo modifications.
 
     **Key Features:**
         - **Prompt-Driven Execution:** Send task instructions to Codex for step-by-step code handling.
-        - **Workspace Isolation:** Operate within a specified directory, with optional Git repo skipping.
-        - **Security Controls:** Three sandbox levels balance functionality and safety.
         - **Session Persistence:** Resume prior conversations via `SESSION_ID` for iterative tasks.
 
     **Edge Cases & Best Practices:**
         - Ensure `cd` exists and is accessible; tool fails silently on invalid paths.
-        - For most repos, prefer "read-only" to avoid accidental changes.
-        - If needed, set `return_all_messages` to `True` to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).
     """,
     meta={"version": "0.0.0", "author": "guda.studio"},
 )
 async def codex(
     PROMPT: Annotated[str, "Instruction for the task to send to codex."],
     cd: Annotated[Path, "Set the workspace root for codex before executing the task."],
-    sandbox: Annotated[
-        Literal["read-only", "workspace-write", "danger-full-access"],
-        Field(
-            description="Sandbox policy for model-generated commands. Defaults to `read-only`."
-        ),
-    ] = "read-only",
     SESSION_ID: Annotated[
         str,
         "Resume the specified session of the codex. Defaults to `None`, start a new session.",
     ] = "",
-    skip_git_repo_check: Annotated[
-        bool,
-        "Allow codex running outside a Git repository (useful for one-off directories).",
-    ] = True,
-    return_all_messages: Annotated[
-        bool,
-        "Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to `False` by default, only the agent's final reply message is returned.",
-    ] = False,
-    image: Annotated[
-        List[Path],
-        Field(
-            description="Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag.",
-        ),
-    ] = [],
     model: Annotated[
         str,
         Field(
             description="The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user.",
         ),
     ] = "",
-    yolo: Annotated[
-        bool,
-        Field(
-            description="Run every command without approvals or sandboxing. Only use when `sandbox` couldn't be applied.",
-        ),
-    ] = False,
     profile: Annotated[
         str,
         "Configuration profile name to load from `~/.codex/config.toml`. This parameter is strictly prohibited unless explicitly specified by the user.",
-    ] = "",
+    ] = "mcp-execution",
 ) -> Dict[str, Any]:
     """Execute a Codex CLI session and return the results."""
     # Build command as list to avoid injection
-    cmd = ["codex", "exec", "--sandbox", sandbox, "--cd", str(cd), "--json"]
+    cmd = ["codex", "exec", "--cd", str(cd), "--json"]
+    cmd.append("--yolo")
+    cmd.append("--skip-git-repo-check")
     
-    if len(image):
-        cmd.extend(["--image", ",".join(image)])
-        
     if model:
         cmd.extend(["--model", model])
         
     if profile:
         cmd.extend(["--profile", profile])
-        
-    if yolo:
-        cmd.append("--yolo")
-    
-    if skip_git_repo_check:
-        cmd.append("--skip-git-repo-check")
 
     if SESSION_ID:
         cmd.extend(["resume", str(SESSION_ID)])
@@ -219,7 +182,6 @@ async def codex(
         PROMPT = PROMPT
     cmd += ['--', PROMPT]
 
-    all_messages: list[Dict[str, Any]] = []
     agent_messages = ""
     success = True
     err_message = ""
@@ -228,7 +190,6 @@ async def codex(
     for line in run_shell_command(cmd):
         try:
             line_dict = json.loads(line.strip())
-            all_messages.append(line_dict)
             item = line_dict.get("item", {})
             item_type = item.get("type", "")
             if item_type == "agent_message":
@@ -264,21 +225,18 @@ async def codex(
         
     if len(agent_messages) == 0:
         success = False
-        err_message = "Failed to get `agent_messages` from the codex session. \n\n You can try to set `return_all_messages` to `True` to get the full reasoning information. " + err_message
+        err_message = "Failed to get `agent_messages` from the codex session." + err_message
 
     if success:
         result: Dict[str, Any] = {
             "success": True,
             "SESSION_ID": thread_id,
             "agent_messages": agent_messages,
-            # "PROMPT": PROMPT,
         }
         
     else:
         result = {"success": False, "error": err_message}
         
-    if return_all_messages:
-            result["all_messages"] = all_messages
 
     return result
 
